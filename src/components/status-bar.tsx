@@ -7,7 +7,7 @@ interface Hint {
   keyLen: number
 }
 
-function getHints(screen: 'list' | 'reader', canGoBack?: boolean, stale?: boolean): Hint[] {
+function getHints(screen: 'list' | 'reader', canGoBack?: boolean, searching?: boolean): Hint[] {
   if (screen === 'list') {
     return [
       { prefix: '↑↓', label: 'navigate', keyLen: 0 },
@@ -23,10 +23,17 @@ function getHints(screen: 'list' | 'reader', canGoBack?: boolean, stale?: boolea
     { label: 'j/k scroll', keyLen: 3 },
     { label: 'd/u page', keyLen: 3 },
     { label: 'g/G top/end', keyLen: 3 },
-    { label: 'edit', keyLen: 1 },
-    { label: 'reload', keyLen: 1 },
   ]
-  if (canGoBack) {
+  if (searching) {
+    hints.push({ label: 'n/N match', keyLen: 3 })
+  } else {
+    hints.push({ label: '/search', keyLen: 1 })
+    hints.push({ label: 'edit', keyLen: 1 })
+    hints.push({ label: 'reload', keyLen: 1 })
+  }
+  if (searching) {
+    hints.push({ prefix: 'esc', label: 'clear', keyLen: 0 })
+  } else if (canGoBack) {
     hints.push({ prefix: 'esc', label: 'back', keyLen: 0 })
   }
   hints.push({ label: 'quit', keyLen: 1 })
@@ -44,30 +51,64 @@ interface StatusBarProps {
   stale?: boolean
   // List props
   fileCount?: number
+  // Search props
+  searchMode?: boolean
+  searchQuery?: string
+  matchCount?: number
+  matchIndex?: number
 }
 
-export function StatusBar({ screen, width, fileName, line, totalLines, canGoBack, stale, fileCount }: StatusBarProps) {
-  const hints = getHints(screen, canGoBack, stale)
-
+export function StatusBar({ screen, width, fileName, line, totalLines, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex }: StatusBarProps) {
   if (screen === 'reader') {
+    // Search input mode — replace entire bar with search prompt
+    if (searchMode) {
+      const prompt = ` /${searchQuery ?? ''}`
+      const cursor = '█'
+      const mc = matchCount ?? 0
+      const info = searchQuery
+        ? mc > 0
+          ? `${mc} match${mc !== 1 ? 'es' : ''} `
+          : 'no matches '
+        : ''
+      const used = prompt.length + 1 + info.length
+      const gap = Math.max(0, width - used)
+
+      return (
+        <Box width={width}>
+          <Text dimColor>{prompt}</Text>
+          <Text>{'█'}</Text>
+          <Text>{' '.repeat(gap)}</Text>
+          <Text dimColor>{info}</Text>
+        </Box>
+      )
+    }
+
     const pct = totalLines && totalLines > 0 ? Math.min(100, Math.round(((line ?? 1) / totalLines) * 100)) : 100
     const staleTag = stale ? ' [modified]' : ''
-    const left = ` ${fileName ?? ''}${staleTag}  ${line ?? 0}/${totalLines ?? 0}  ${pct}%`
-    const right = hints.map(h => {
-      if (h.prefix) return `${h.prefix} ${h.label}`
-      return h.label
-    }).join('  ') + ' '
+    const searching = !!searchQuery
+    const hints = getHints(screen, canGoBack, searching)
+    // Compact: show only key shortcuts, drop descriptions
+    const keys = hints.map(h => {
+      if (h.prefix) return h.prefix
+      return h.keyLen > 0 ? h.label.slice(0, h.keyLen) : h.label.charAt(0)
+    }).join('  ')
+    const matchInfo = searching && (matchCount ?? 0) > 0
+      ? `  [${(matchIndex ?? 0) + 1}/${matchCount}]`
+      : ''
+    const left = ` ${fileName ?? ''}${staleTag}  ${line ?? 0}/${totalLines ?? 0}  ${pct}%${matchInfo}`
+    const right = keys + ' '
     const gap = Math.max(1, width - left.length - right.length)
     const bar = left + ' '.repeat(gap) + right
 
     return (
       <Box width={width}>
-        <Text inverse>{bar}</Text>
+        <Text dimColor>{bar}</Text>
       </Box>
     )
   }
 
   // List mode — pm-style hint bar
+  const hints = getHints(screen)
   return (
     <Box paddingX={2} gap={2}>
       <Text dimColor>──</Text>
