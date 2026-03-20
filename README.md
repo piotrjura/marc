@@ -23,7 +23,7 @@ Opens a fullscreen file browser showing all `.md` and `.mdx` files in the curren
 ### Open a specific file
 
 ```bash
-marc notes/2026-03-15.md
+marc docs/setup.md
 ```
 
 Opens the file directly in the reader.
@@ -31,7 +31,7 @@ Opens the file directly in the reader.
 ### Search inside files
 
 ```bash
-marc search "audio interface"
+marc search "deployment"
 ```
 
 Searches file contents (case-insensitive substring match). Prints matching files with line numbers and context. Pipe-friendly — works with `grep`, `head`, `less`, etc.
@@ -39,11 +39,11 @@ Searches file contents (case-insensitive substring match). Prints matching files
 Output format:
 
 ```
-notes/2026-02-05.md
-  L3: Audio - problem solved!
-  L5: The rumbling was from echo - hard wall behind me...
-week-summaries/week-2026-W06.md
-  L8: Audio — problem rozwiązany
+docs/setup.md
+  L12: Run the deployment script before pushing to production
+  L45: The deployment pipeline handles migrations automatically
+notes/meeting-notes.md
+  L8: Decided to switch deployment to Railway
 ```
 
 ## TUI keybindings
