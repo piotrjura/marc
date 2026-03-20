@@ -1,5 +1,9 @@
 # marc
 
+### Demo
+
+https://github.com/user-attachments/assets/912e9c99-e0d0-430f-9bf4-bdadeb31814f
+
 A terminal markdown reader. Browse, search, and read markdown files without leaving the terminal.
 
 Built with React (Ink) for a vim-like keyboard-driven experience with full markdown rendering — headings, code blocks with syntax highlighting, tables, lists, blockquotes, and inline formatting.
@@ -8,6 +12,12 @@ Built with React (Ink) for a vim-like keyboard-driven experience with full markd
 
 ```bash
 npm install -g @piotrjura/marc
+```
+
+Or run without installing:
+
+```bash
+npx @piotrjura/marc
 ```
 
 ## Usage
