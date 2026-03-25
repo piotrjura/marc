@@ -36,6 +36,10 @@ Reader:
   u / Page Up       Half page up
   g                 Go to top
   G                 Go to bottom
+  f                 Toggle reading focus mode
+  [ / ]             Previous / next block
+  /                 Search in document
+  n / N             Next / previous match
   e                 Open in $EDITOR
   r                 Reload file
   Esc               Back to file list

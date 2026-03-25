@@ -6,19 +6,49 @@ import stringWidth from 'string-width'
 
 // ── Public API ─────────────────────────────────────────────────
 
+export interface BlockRange {
+  start: number  // inclusive line index
+  end: number    // exclusive line index
+}
+
+export interface RenderResult {
+  lines: string[]
+  blocks: BlockRange[]
+}
+
 export function renderMarkdown(source: string, width: number): string[] {
+  return renderMarkdownWithBlocks(source, width).lines
+}
+
+export function renderMarkdownWithBlocks(source: string, width: number): RenderResult {
   const effectiveWidth = Math.max(width, 20)
   const clean = stripFrontmatter(source)
-  if (!clean.trim()) return ['', chalk.dim('(empty document)'), '']
+  if (!clean.trim()) return { lines: ['', chalk.dim('(empty document)'), ''], blocks: [] }
 
   const tokens = marked.lexer(clean)
-  const blocks = tokens
-    .map(t => renderBlock(t, effectiveWidth))
-    .filter(b => b.length > 0)
-
   const lines: string[] = []
-  for (const block of blocks) {
-    lines.push(...block)
+  const blocks: BlockRange[] = []
+
+  for (const token of tokens) {
+    if (token.type === 'space') continue
+
+    if (token.type === 'list') {
+      const result = renderListWithItems(token, effectiveWidth)
+      if (result.lines.length === 0) continue
+      const offset = lines.length
+      lines.push(...result.lines)
+      for (const item of result.itemRanges) {
+        blocks.push({ start: offset + item.start, end: offset + item.end })
+      }
+      lines.push('')
+      continue
+    }
+
+    const blockLines = renderBlock(token, effectiveWidth)
+    if (blockLines.length === 0) continue
+    const start = lines.length
+    lines.push(...blockLines)
+    blocks.push({ start, end: lines.length })
     lines.push('')
   }
 
@@ -27,7 +57,7 @@ export function renderMarkdown(source: string, width: number): string[] {
     lines.pop()
   }
 
-  return lines
+  return { lines, blocks }
 }
 
 function stripFrontmatter(source: string): string {
@@ -134,6 +164,85 @@ function renderCodeBlock(code: string, lang: string | undefined, width: number):
 }
 
 // ── Lists ──────────────────────────────────────────────────────
+
+function renderListWithItems(
+  token: any,
+  width: number
+): { lines: string[]; itemRanges: BlockRange[] } {
+  const lines: string[] = []
+  const itemRanges: BlockRange[] = []
+  const items: any[] = token.items ?? []
+  const ordered: boolean = token.ordered ?? false
+  const start: number = typeof token.start === 'number' ? token.start : 1
+
+  for (let i = 0; i < items.length; i++) {
+    const itemStart = lines.length
+    const item = items[i]
+
+    let bullet: string
+    if (item.task) {
+      bullet = item.checked ? chalk.green('✓') : chalk.dim('○')
+    } else if (ordered) {
+      bullet = chalk.dim(`${start + i}.`)
+    } else {
+      bullet = chalk.dim('•')
+    }
+
+    const contentTokens = (item.tokens ?? []).filter(
+      (t: any) => t.type === 'text' || t.type === 'paragraph'
+    )
+    const nestedBlocks = (item.tokens ?? []).filter(
+      (t: any) => t.type !== 'text' && t.type !== 'paragraph'
+    )
+
+    const text = contentTokens
+      .map((t: any) => renderInline(t.tokens ?? []))
+      .join('\n')
+
+    if (text) {
+      const wrapped = wrapAnsi(text, width - 5, { hard: true }).split('\n')
+      lines.push(`  ${bullet} ${wrapped[0]}`)
+      for (let j = 1; j < wrapped.length; j++) {
+        lines.push(`    ${wrapped[j]}`)
+      }
+    } else {
+      lines.push(`  ${bullet}`)
+    }
+
+    // Parent text content as its own block
+    if (lines.length > itemStart) {
+      itemRanges.push({ start: itemStart, end: lines.length })
+    }
+
+    for (const nested of nestedBlocks) {
+      if (nested.type === 'list') {
+        // Recursively produce per-item ranges for nested lists
+        const nestedResult = renderListWithItems(nested, width - 4)
+        const nestedOffset = lines.length
+        for (const nl of nestedResult.lines) {
+          lines.push(`    ${nl}`)
+        }
+        for (const range of nestedResult.itemRanges) {
+          itemRanges.push({
+            start: nestedOffset + range.start,
+            end: nestedOffset + range.end,
+          })
+        }
+      } else {
+        const nestedStart = lines.length
+        const nestedLines = renderBlock(nested, width - 4)
+        for (const nl of nestedLines) {
+          lines.push(`    ${nl}`)
+        }
+        if (lines.length > nestedStart) {
+          itemRanges.push({ start: nestedStart, end: lines.length })
+        }
+      }
+    }
+  }
+
+  return { lines, itemRanges }
+}
 
 function renderList(token: any, width: number): string[] {
   const lines: string[] = []

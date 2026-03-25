@@ -31,7 +31,7 @@ export function App({ initialFile }: Props) {
       : { type: 'list' }
   )
   const [scroll, setScroll] = useState(0)
-  const listStateRef = useRef<ListState>({ cursor: 0, page: 0, search: '' })
+  const listStateRef = useRef<ListState>({ cursor: 0, page: 0, search: '', searchType: 'filename' })
   const hasList = !initialFile
 
   // Search state
@@ -40,6 +40,7 @@ export function App({ initialFile }: Props) {
   const [matchIndex, setMatchIndex] = useState(0)
   const scrollRef = useRef(0)
   scrollRef.current = scroll
+  const pendingJumpRef = useRef(false)
 
   // Scan files for browser mode
   const files = useMemo(() => {
@@ -67,7 +68,7 @@ export function App({ initialFile }: Props) {
 
   // Markdown lines for reader
   const lines = useMemo(() => {
-    if (screen.type !== 'reader') return []
+    if (screen.type !== 'reader') return [] as string[]
     return renderMarkdown(screen.content, dims.cols)
   }, [screen, dims.cols])
 
@@ -91,6 +92,17 @@ export function App({ initialFile }: Props) {
     setScroll(Math.max(0, Math.min(target, maxS)))
   }, [matchLines, searchMode, lines.length, bodyHeight])
 
+  // Jump to first match when opening from content search
+  useEffect(() => {
+    if (pendingJumpRef.current && matchLines.length > 0) {
+      pendingJumpRef.current = false
+      setMatchIndex(0)
+      const target = Math.max(0, matchLines[0] - Math.floor(bodyHeight / 3))
+      const maxS = Math.max(0, lines.length - bodyHeight)
+      setScroll(Math.max(0, Math.min(target, maxS)))
+    }
+  }, [matchLines, lines.length, bodyHeight])
+
   // Clamp scroll when maxScroll changes (e.g. resize)
   useEffect(() => {
     if (scroll > maxScroll) setScroll(maxScroll)
@@ -100,15 +112,20 @@ export function App({ initialFile }: Props) {
     setScroll(s => Math.max(0, Math.min(n, Math.max(0, lines.length - bodyHeight))))
   }, [lines.length, bodyHeight])
 
-  // Clear search when leaving reader
   const openFile = useCallback((file: FileInfo, state: ListState) => {
     listStateRef.current = state
     try {
       const content = readFileSync(file.absPath, 'utf-8')
       setScreen({ type: 'reader', fileName: file.relPath, absPath: file.absPath, content })
       setScroll(0)
-      setSearchQuery('')
       setSearchMode(false)
+      // Carry content search query into reader for highlighting + navigation
+      if (state.searchType === 'content' && state.search) {
+        setSearchQuery(state.search)
+        pendingJumpRef.current = true
+      } else {
+        setSearchQuery('')
+      }
     } catch {
       // Can't read file
     }
@@ -218,12 +235,10 @@ export function App({ initialFile }: Props) {
     }
     if (input === 'e') return openInEditor()
     if (input === 'r') return reloadFile()
-    if (input === 'j' || key.downArrow) return scrollTo(scroll + 1)
-    if (input === 'k' || key.upArrow) return scrollTo(scroll - 1)
-    if (input === 'd' || key.pageDown) return scrollTo(scroll + Math.floor(bodyHeight / 2))
-    if (input === 'u' || key.pageUp) return scrollTo(scroll - Math.floor(bodyHeight / 2))
-    if (input === 'g') return scrollTo(0)
-    if (input === 'G') return scrollTo(maxScroll)
+    if (key.downArrow) return scrollTo(scroll + 1)
+    if (key.upArrow) return scrollTo(scroll - 1)
+    if (key.pageDown) return scrollTo(scroll + Math.floor(bodyHeight / 2))
+    if (key.pageUp) return scrollTo(scroll - Math.floor(bodyHeight / 2))
   })
 
   if (screen.type === 'list') {
@@ -238,6 +253,7 @@ export function App({ initialFile }: Props) {
           initialCursor={listStateRef.current.cursor}
           initialPage={listStateRef.current.page}
           initialSearch={listStateRef.current.search}
+          initialSearchType={listStateRef.current.searchType}
         />
         <StatusBar
           screen="list"
@@ -269,6 +285,7 @@ export function App({ initialFile }: Props) {
         fileName={screen.fileName}
         line={scroll + 1}
         totalLines={lines.length}
+        pct={maxScroll > 0 ? Math.round((scroll / maxScroll) * 100) : 100}
         canGoBack={hasList}
         stale={stale}
         searchMode={searchMode}

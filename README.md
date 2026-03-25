@@ -75,15 +75,13 @@ notes/meeting-notes.md
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Scroll down |
-| `k` / `↑` | Scroll up |
-| `d` / `Page Down` | Half page down |
-| `u` / `Page Up` | Half page up |
-| `g` | Go to top |
-| `G` | Go to bottom |
+| `↑` / `↓` | Scroll up / down |
+| `Page Up` / `Page Down` | Half page up / down |
+| `/` | Search in document |
+| `n` / `N` | Next / previous match |
 | `e` | Open in `$EDITOR` |
 | `r` | Reload file |
-| `Esc` | Back to file list |
+| `Esc` | Clear search / back to file list |
 | `q` | Quit |
 
 ## Features
@@ -92,7 +90,7 @@ notes/meeting-notes.md
 
 **File browser** — recursive scanning with smart directory filtering (skips `node_modules`, `.git`, `dist`, `build`, etc.), pagination, filename search, file size and relative modification time display.
 
-**Content search** — full-text substring search across all files. In the TUI (`?`), results show the filename with a preview of the first matching line. On the CLI (`marc search`), results include up to 3 matching lines per file.
+**Content search** — full-text substring search across all files. In the TUI (`?`), results show the filename with a preview of the first matching line. Opening a result auto-jumps to the first occurrence and highlights all matches — use `n`/`N` to navigate between them. On the CLI (`marc search`), results include up to 3 matching lines per file.
 
 **External edit detection** — when reading a file, marc watches for external changes (1s polling). If the file is modified (by an editor, Claude Code, or any other process), `[modified]` appears in the status bar. Press `r` to reload.
 
@@ -131,3 +129,24 @@ npm run dev          # Run with tsx (no build step)
 npm run build        # Build with tsup (ESM + shebang)
 npm test             # Run tests (vitest)
 ```
+
+## Changelog
+
+### 0.3.0
+
+- **Content search → reader integration** — opening a file from `?` content search now auto-jumps to the first match and highlights all occurrences. `n`/`N` navigation works immediately.
+- **Back navigation preserves search** — returning from a document to the file list now restores content search results instead of showing "no items".
+- **In-document search** (`/`) — incremental search with real-time highlighting and match counter.
+- **Scroll percentage** in the reader status bar.
+- **Block-level rendering infrastructure** — markdown blocks (headings, code, list items) are now tracked with line ranges, enabling future block navigation.
+- **Simplified reader keybindings** — arrow keys and Page Up/Down for scrolling (removed vim-style j/k/d/u/g/G).
+- **Compact status bar** — dimmed, less noisy hint display.
+
+### 0.2.0
+
+- In-document search with highlighting.
+- Dimmed reader status bar.
+
+### 0.1.0
+
+- Initial release — file browser, reader, CLI search, syntax highlighting, external edit detection.

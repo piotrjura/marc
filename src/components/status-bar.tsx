@@ -20,23 +20,22 @@ function getHints(screen: 'list' | 'reader', canGoBack?: boolean, searching?: bo
   }
   // Reader
   const hints: Hint[] = [
-    { label: 'j/k scroll', keyLen: 3 },
-    { label: 'd/u page', keyLen: 3 },
-    { label: 'g/G top/end', keyLen: 3 },
+    { prefix: '↑↓', label: 'scroll', keyLen: 0 },
+    { prefix: 'PgUp/Dn', label: 'page', keyLen: 0 },
   ]
   if (searching) {
     hints.push({ label: 'n/N match', keyLen: 3 })
   } else {
     hints.push({ label: '/search', keyLen: 1 })
-    hints.push({ label: 'edit', keyLen: 1 })
-    hints.push({ label: 'reload', keyLen: 1 })
+    hints.push({ label: 'eedit', keyLen: 1 })
+    hints.push({ label: 'rreload', keyLen: 1 })
   }
   if (searching) {
     hints.push({ prefix: 'esc', label: 'clear', keyLen: 0 })
   } else if (canGoBack) {
     hints.push({ prefix: 'esc', label: 'back', keyLen: 0 })
   }
-  hints.push({ label: 'quit', keyLen: 1 })
+  hints.push({ label: 'qquit', keyLen: 1 })
   return hints
 }
 
@@ -47,6 +46,7 @@ interface StatusBarProps {
   fileName?: string
   line?: number
   totalLines?: number
+  pct?: number
   canGoBack?: boolean
   stale?: boolean
   // List props
@@ -58,7 +58,7 @@ interface StatusBarProps {
   matchIndex?: number
 }
 
-export function StatusBar({ screen, width, fileName, line, totalLines, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex }: StatusBarProps) {
+export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctProp, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex }: StatusBarProps) {
   if (screen === 'reader') {
     // Search input mode — replace entire bar with search prompt
     if (searchMode) {
@@ -83,7 +83,7 @@ export function StatusBar({ screen, width, fileName, line, totalLines, canGoBack
       )
     }
 
-    const pct = totalLines && totalLines > 0 ? Math.min(100, Math.round(((line ?? 1) / totalLines) * 100)) : 100
+    const pct = pctProp ?? 100
     const staleTag = stale ? ' [modified]' : ''
     const searching = !!searchQuery
     const hints = getHints(screen, canGoBack, searching)

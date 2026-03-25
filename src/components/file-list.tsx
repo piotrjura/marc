@@ -13,12 +13,14 @@ interface FileListProps {
   initialCursor?: number
   initialPage?: number
   initialSearch?: string
+  initialSearchType?: SearchType
 }
 
 export interface ListState {
   cursor: number
   page: number
   search: string
+  searchType: SearchType
 }
 
 type SearchType = 'filename' | 'content'
@@ -32,12 +34,13 @@ export function FileList({
   initialCursor = 0,
   initialPage = 0,
   initialSearch = '',
+  initialSearchType = 'filename' as SearchType,
 }: FileListProps) {
   const [cursor, setCursor] = useState(initialCursor)
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [searchMode, setSearchMode] = useState(false)
-  const [searchType, setSearchType] = useState<SearchType>('filename')
+  const [searchType, setSearchType] = useState<SearchType>(initialSearchType)
 
   // Filename-filtered files
   const filteredFiles = useMemo(() => {
@@ -93,7 +96,7 @@ export function FileList({
       const item = pageItems[cursor]
       if (item) {
         const file = isContentSearch ? (item as SearchResult).file : (item as FileInfo)
-        onSelect(file, { cursor, page: clampedPage, search })
+        onSelect(file, { cursor, page: clampedPage, search, searchType })
       }
     }
   })
