@@ -55,7 +55,12 @@ export function scanMarkdownFiles(root: string): FileInfo[] {
   }
 
   walk(root)
-  files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+  files.sort((a, b) => {
+    const depthA = a.dir === '.' ? 0 : a.dir.split('/').length
+    const depthB = b.dir === '.' ? 0 : b.dir.split('/').length
+    if (depthA !== depthB) return depthA - depthB
+    return b.mtime.getTime() - a.mtime.getTime()
+  })
   return files
 }
 

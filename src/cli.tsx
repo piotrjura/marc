@@ -30,19 +30,23 @@ File browser:
   q                 Quit
 
 Reader:
-  j / ↓             Scroll down
-  k / ↑             Scroll up
-  d / Page Down     Half page down
-  u / Page Up       Half page up
-  g                 Go to top
-  G                 Go to bottom
-  f                 Toggle reading focus mode
-  [ / ]             Previous / next block
+  ↓ / ↑             Scroll line by line
+  PgDn / PgUp       Half page scroll
+  [ / ]             Previous / next heading
   /                 Search in document
   n / N             Next / previous match
+  p                 Enter presentation mode
   e                 Open in $EDITOR
   r                 Reload file
   Esc               Back to file list
+  q                 Quit
+
+Presentation mode (p to enter):
+  → / Space / l     Next slide
+  ← / h             Previous slide
+  ↓ / j             Focus next block
+  ↑ / k             Focus previous block
+  p / Esc           Exit presentation
   q                 Quit`)
   process.exit(0)
 }

@@ -14,6 +14,7 @@ export interface BlockRange {
 export interface RenderResult {
   lines: string[]
   blocks: BlockRange[]
+  headings: number[]  // line indices where headings start
 }
 
 export function renderMarkdown(source: string, width: number): string[] {
@@ -23,11 +24,12 @@ export function renderMarkdown(source: string, width: number): string[] {
 export function renderMarkdownWithBlocks(source: string, width: number): RenderResult {
   const effectiveWidth = Math.max(width, 20)
   const clean = stripFrontmatter(source)
-  if (!clean.trim()) return { lines: ['', chalk.dim('(empty document)'), ''], blocks: [] }
+  if (!clean.trim()) return { lines: ['', chalk.dim('(empty document)'), ''], blocks: [], headings: [] }
 
   const tokens = marked.lexer(clean)
   const lines: string[] = []
   const blocks: BlockRange[] = []
+  const headings: number[] = []
 
   for (const token of tokens) {
     if (token.type === 'space') continue
@@ -47,6 +49,7 @@ export function renderMarkdownWithBlocks(source: string, width: number): RenderR
     const blockLines = renderBlock(token, effectiveWidth)
     if (blockLines.length === 0) continue
     const start = lines.length
+    if (token.type === 'heading') headings.push(start)
     lines.push(...blockLines)
     blocks.push({ start, end: lines.length })
     lines.push('')
@@ -57,10 +60,10 @@ export function renderMarkdownWithBlocks(source: string, width: number): RenderR
     lines.pop()
   }
 
-  return { lines, blocks }
+  return { lines, blocks, headings }
 }
 
-function stripFrontmatter(source: string): string {
+export function stripFrontmatter(source: string): string {
   const match = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
   return match ? source.slice(match[0].length) : source
 }
@@ -76,7 +79,7 @@ const HEADING_STYLES = [
   chalk.bold,          // h6
 ]
 
-function renderBlock(token: any, width: number): string[] {
+export function renderBlock(token: any, width: number): string[] {
   switch (token.type) {
     case 'heading': {
       const text = renderInline(token.tokens ?? [])
@@ -165,7 +168,7 @@ function renderCodeBlock(code: string, lang: string | undefined, width: number):
 
 // ── Lists ──────────────────────────────────────────────────────
 
-function renderListWithItems(
+export function renderListWithItems(
   token: any,
   width: number
 ): { lines: string[]; itemRanges: BlockRange[] } {

@@ -81,7 +81,20 @@ notes/meeting-notes.md
 | `n` / `N` | Next / previous match |
 | `e` | Open in `$EDITOR` |
 | `r` | Reload file |
+| `p` | Enter presentation mode |
+| `[` / `]` | Previous / next heading |
 | `Esc` | Clear search / back to file list |
+| `q` | Quit |
+
+### Presentation mode
+
+| Key | Action |
+|-----|--------|
+| `→` / `Space` / `l` | Next slide |
+| `←` / `h` | Previous slide |
+| `↓` / `j` | Highlight next block |
+| `↑` / `k` | Highlight previous block |
+| `Esc` / `p` | Exit presentation |
 | `q` | Quit |
 
 ## Features
@@ -95,6 +108,8 @@ notes/meeting-notes.md
 **External edit detection** — when reading a file, marc watches for external changes (1s polling). If the file is modified (by an editor, Claude Code, or any other process), `[modified]` appears in the status bar. Press `r` to reload.
 
 **Editor integration** — press `e` to open the current file in `$EDITOR` (falls back to `vi`). Marc reloads the file automatically when the editor exits.
+
+**Presentation mode** — press `p` in the reader to present markdown as slides. Slides are separated by `---` (horizontal rules). Content is centered at 88% terminal width. Navigate slides with arrow keys or `h`/`l`. Use `↓`/`↑` to step through blocks (headings, paragraphs, individual bullets) — the focused block is highlighted with reverse video. Slide transitions use a split-flap wipe effect that sweeps directionally (up for next, down for previous). Files without `---` separators display as a single slide.
 
 ## How it works
 
@@ -119,6 +134,8 @@ src/
 └── lib/
     ├── files.ts             # File scanning, filtering, formatting
     ├── search.ts            # Content search (substring match)
+    ├── search-doc.ts        # In-document search + highlighting
+    ├── slides.ts            # Markdown → slide splitting + rendering
     └── render.ts            # Markdown → styled terminal lines
 ```
 
@@ -131,6 +148,12 @@ npm test             # Run tests (vitest)
 ```
 
 ## Changelog
+
+### 0.4.0
+
+- **Presentation mode** — press `p` in the reader to present markdown as a slideshow. `---` separators split slides. Centered layout, directional split-flap wipe transitions, block-level focus with reverse-video highlight.
+- **Heading navigation** — `[`/`]` to jump between headings in the reader.
+- **Slide block focus** — `↓`/`↑` steps through headings, paragraphs, and individual bullets with reverse-video highlighting.
 
 ### 0.3.0
 

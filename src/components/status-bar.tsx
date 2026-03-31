@@ -27,6 +27,8 @@ function getHints(screen: 'list' | 'reader', canGoBack?: boolean, searching?: bo
     hints.push({ label: 'n/N match', keyLen: 3 })
   } else {
     hints.push({ label: '/search', keyLen: 1 })
+    hints.push({ prefix: '[]', label: 'section', keyLen: 0 })
+    hints.push({ label: 'ppresent', keyLen: 1 })
     hints.push({ label: 'eedit', keyLen: 1 })
     hints.push({ label: 'rreload', keyLen: 1 })
   }
@@ -40,7 +42,7 @@ function getHints(screen: 'list' | 'reader', canGoBack?: boolean, searching?: bo
 }
 
 interface StatusBarProps {
-  screen: 'list' | 'reader'
+  screen: 'list' | 'reader' | 'presentation'
   width: number
   // Reader props
   fileName?: string
@@ -56,9 +58,35 @@ interface StatusBarProps {
   searchQuery?: string
   matchCount?: number
   matchIndex?: number
+  // Heading navigation
+  headingIndex?: number
+  headingCount?: number
+  // Presentation props
+  slideIndex?: number
+  slideCount?: number
+  slideTitle?: string
+  slideOverflow?: boolean
 }
 
-export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctProp, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex }: StatusBarProps) {
+export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctProp, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex, headingIndex, headingCount, slideIndex, slideCount, slideTitle, slideOverflow }: StatusBarProps) {
+  if (screen === 'presentation') {
+    const idx = (slideIndex ?? 0) + 1
+    const total = slideCount ?? 0
+    const title = slideTitle ? `  ${slideTitle}` : ''
+    const left = ` Slide ${idx}/${total}${title}`
+    const right = slideOverflow
+      ? '← → slide  ↑↓ focus/scroll  p exit '
+      : '← → slide  ↑↓ focus  p exit '
+    const gap = Math.max(1, width - left.length - right.length)
+    const bar = left + ' '.repeat(gap) + right
+
+    return (
+      <Box width={width}>
+        <Text dimColor>{bar}</Text>
+      </Box>
+    )
+  }
+
   if (screen === 'reader') {
     // Search input mode — replace entire bar with search prompt
     if (searchMode) {
@@ -95,7 +123,12 @@ export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctP
     const matchInfo = searching && (matchCount ?? 0) > 0
       ? `  [${(matchIndex ?? 0) + 1}/${matchCount}]`
       : ''
-    const left = ` ${fileName ?? ''}${staleTag}  ${line ?? 0}/${totalLines ?? 0}  ${pct}%${matchInfo}`
+    const hIdx = headingIndex ?? -1
+    const hCount = headingCount ?? 0
+    const sectionInfo = hCount > 0
+      ? `  §${hIdx >= 0 ? hIdx + 1 : '-'}/${hCount}`
+      : ''
+    const left = ` ${fileName ?? ''}${staleTag}  ${line ?? 0}/${totalLines ?? 0}  ${pct}%${matchInfo}${sectionInfo}`
     const right = keys + ' '
     const gap = Math.max(1, width - left.length - right.length)
     const bar = left + ' '.repeat(gap) + right

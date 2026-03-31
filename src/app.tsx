@@ -3,11 +3,66 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import { readFileSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
-import { renderMarkdown } from './lib/render.js'
+import { renderMarkdownWithBlocks } from './lib/render.js'
+import { splitIntoSlides, type Slide } from './lib/slides.js'
 import { findMatches, highlightLine } from './lib/search-doc.js'
 import { scanMarkdownFiles, type FileInfo } from './lib/files.js'
 import { FileList, type ListState } from './components/file-list.js'
 import { StatusBar } from './components/status-bar.js'
+import type { BlockRange } from './lib/render.js'
+
+// ── Presentation helpers ──────────────────────────────────
+
+const REVERSE_ON = '\x1b[7m'
+const REVERSE_OFF = '\x1b[27m'
+
+/** Highlight focused block with reverse video, show all content. */
+function applyFocusHighlight(
+  visibleLines: string[],
+  blocks: BlockRange[],
+  focusIdx: number,
+  scrollOffset: number,
+): string[] {
+  if (focusIdx < 0) return visibleLines
+  const block = blocks[focusIdx]
+  if (!block) return visibleLines
+  return visibleLines.map((line, i) => {
+    const absLine = i + scrollOffset
+    if (absLine >= block.start && absLine < block.end) {
+      return REVERSE_ON + line + REVERSE_OFF
+    }
+    return line
+  })
+}
+
+/** Generate a single line of split-flap flip characters. */
+function generateFlipLine(width: number): string {
+  const chars = ['▄', '▀', '█', '▒', '░', '▓', '▌', '▐']
+  let line = ''
+  for (let c = 0; c < width; c++) {
+    line += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return '\x1b[2m' + line + '\x1b[22m'
+}
+
+/** Pre-render a slide as padded screen lines for transition blending. */
+function renderSlideToScreen(slide: Slide, bodyHeight: number, padding: string): string[] {
+  const slideHeight = slide.lines.length
+  const topPad = slideHeight <= bodyHeight ? Math.floor((bodyHeight - slideHeight) / 2) : 0
+  return Array.from({ length: bodyHeight }, (_, i) => {
+    const lineIdx = i - topPad
+    const content = lineIdx >= 0 && lineIdx < slide.lines.length ? slide.lines[lineIdx] : ''
+    return padding + (content || ' ')
+  })
+}
+
+interface SplitFlapState {
+  phase: number
+  totalPhases: number
+  direction: 'forward' | 'backward'
+  oldLines: string[]
+  newLines: string[]
+}
 
 type Screen =
   | { type: 'list' }
@@ -42,6 +97,13 @@ export function App({ initialFile }: Props) {
   scrollRef.current = scroll
   const pendingJumpRef = useRef(false)
 
+  // Presentation mode state
+  const [presenting, setPresenting] = useState(false)
+  const [slideIndex, setSlideIndex] = useState(0)
+  const [slideScroll, setSlideScroll] = useState(0)
+  const [focusedBlock, setFocusedBlock] = useState(-1)
+  const [splitFlap, setSplitFlap] = useState<SplitFlapState | null>(null)
+
   // Scan files for browser mode
   const files = useMemo(() => {
     if (!hasList) return []
@@ -66,11 +128,25 @@ export function App({ initialFile }: Props) {
 
   const bodyHeight = dims.rows - 1
 
-  // Markdown lines for reader
-  const lines = useMemo(() => {
-    if (screen.type !== 'reader') return [] as string[]
-    return renderMarkdown(screen.content, dims.cols)
-  }, [screen, dims.cols])
+  // Zen mode: cap content width and center with margins
+  const readerWidth = Math.min(Math.floor(dims.cols * 0.7), 100)
+  const presentWidth = Math.min(Math.floor(dims.cols * 0.88), 120)
+  const activeWidth = presenting ? presentWidth : readerWidth
+  const leftPad = Math.max(0, Math.floor((dims.cols - activeWidth) / 2))
+  const padding = leftPad > 0 ? ' '.repeat(leftPad) : ''
+
+  // Markdown lines and heading positions for reader (always at reader width)
+  const { lines, headings } = useMemo(() => {
+    if (screen.type !== 'reader') return { lines: [] as string[], headings: [] as number[] }
+    const result = renderMarkdownWithBlocks(screen.content, readerWidth)
+    return { lines: result.lines, headings: result.headings }
+  }, [screen, readerWidth])
+
+  // Slides for presentation mode
+  const slides = useMemo(() => {
+    if (screen.type !== 'reader') return [] as Slide[]
+    return splitIntoSlides(screen.content, presentWidth)
+  }, [screen, presentWidth])
 
   const maxScroll = Math.max(0, lines.length - bodyHeight)
 
@@ -195,9 +271,133 @@ export function App({ initialFile }: Props) {
     scrollTo(target)
   }, [matchLines, bodyHeight, scrollTo])
 
+  // Current heading index (last heading at or before top of viewport)
+  const currentHeading = useMemo(() => {
+    if (headings.length === 0) return -1
+    let idx = -1
+    for (let i = 0; i < headings.length; i++) {
+      if (headings[i] <= scroll) idx = i
+    }
+    return idx
+  }, [headings, scroll])
+
+  const jumpToHeading = useCallback((direction: 1 | -1) => {
+    if (headings.length === 0) return
+    let target: number
+    if (direction === 1) {
+      const next = headings.findIndex(h => h > scroll)
+      if (next === -1) return
+      target = next
+    } else {
+      let prev = -1
+      for (let i = headings.length - 1; i >= 0; i--) {
+        if (headings[i] < scroll) { prev = i; break }
+      }
+      if (prev === -1) return
+      target = prev
+    }
+    scrollTo(headings[target])
+  }, [headings, scroll, scrollTo])
+
+  // ── Presentation mode ─────────────────────────────────────
+  const enterPresentation = useCallback(() => {
+    setPresenting(true)
+    setSlideIndex(0)
+    setSlideScroll(0)
+    setFocusedBlock(-1)
+    setSearchMode(false)
+    setSearchQuery('')
+  }, [])
+
+  const exitPresentation = useCallback(() => {
+    setPresenting(false)
+    setFocusedBlock(-1)
+    setSlideScroll(0)
+  }, [])
+
+  const currentSlide = slides[slideIndex] as Slide | undefined
+
+  const goToSlide = useCallback((idx: number) => {
+    if (idx < 0 || idx >= slides.length) return
+    const oldSlide = slides[slideIndex]
+    const newSlide = slides[idx]
+    if (!oldSlide || !newSlide) return
+    const direction = idx > slideIndex ? 'forward' : 'backward'
+    const totalPhases = 8
+    const oldLines = renderSlideToScreen(oldSlide, bodyHeight, padding)
+    const newLines = renderSlideToScreen(newSlide, bodyHeight, padding)
+    setSplitFlap({ phase: 0, totalPhases, direction, oldLines, newLines })
+    setSlideIndex(idx)
+    setSlideScroll(0)
+    setFocusedBlock(-1)
+  }, [slides, slideIndex, bodyHeight, padding])
+
+  // Advance split-flap animation frames
+  useEffect(() => {
+    if (!splitFlap) return
+    if (splitFlap.phase >= splitFlap.totalPhases) {
+      setSplitFlap(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setSplitFlap(prev => prev ? { ...prev, phase: prev.phase + 1 } : null)
+    }, 40)
+    return () => clearTimeout(timer)
+  }, [splitFlap])
+
   // Reader keyboard input
   useInput((input, key) => {
     if (screen.type !== 'reader') return
+
+    // Presentation mode keybindings
+    if (presenting) {
+      if (splitFlap) return // ignore keys during split-flap transition
+      if (key.escape || input === 'p') return exitPresentation()
+      if (input === 'q') return exit()
+      if ((key.rightArrow || input === ' ' || input === 'l') && slideIndex < slides.length - 1) {
+        return goToSlide(slideIndex + 1)
+      }
+      if ((key.leftArrow || input === 'h') && slideIndex > 0) {
+        return goToSlide(slideIndex - 1)
+      }
+      // Block focus navigation
+      if (currentSlide) {
+        const blockCount = currentSlide.blocks.length
+        if (key.downArrow || input === 'j') {
+          if (focusedBlock < blockCount - 1) {
+            setFocusedBlock(focusedBlock + 1)
+            // Auto-scroll to keep focused block visible
+            const block = currentSlide.blocks[focusedBlock + 1]
+            const slideHeight = currentSlide.lines.length
+            const topPad = slideHeight <= bodyHeight ? Math.floor((bodyHeight - slideHeight) / 2) : 0
+            if (topPad === 0 && block) {
+              const blockEnd = block.end
+              if (blockEnd - slideScroll > bodyHeight) {
+                setSlideScroll(Math.min(blockEnd - bodyHeight, slideHeight - bodyHeight))
+              }
+            }
+          }
+          return
+        }
+        if (key.upArrow || input === 'k') {
+          if (focusedBlock >= 0) {
+            const newFocus = focusedBlock - 1
+            setFocusedBlock(newFocus)
+            // Auto-scroll to keep focused block visible
+            if (newFocus >= 0) {
+              const block = currentSlide.blocks[newFocus]
+              if (block && block.start < slideScroll) {
+                setSlideScroll(block.start)
+              }
+            } else {
+              setSlideScroll(0)
+            }
+          }
+          return
+        }
+      }
+      return
+    }
 
     // Search input mode
     if (searchMode) {
@@ -233,6 +433,9 @@ export function App({ initialFile }: Props) {
       jumpToMatch((matchIndex - 1 + matchLines.length) % matchLines.length)
       return
     }
+    if (input === ']') return jumpToHeading(1)
+    if (input === '[') return jumpToHeading(-1)
+    if (input === 'p') return enterPresentation()
     if (input === 'e') return openInEditor()
     if (input === 'r') return reloadFile()
     if (key.downArrow) return scrollTo(scroll + 1)
@@ -264,7 +467,93 @@ export function App({ initialFile }: Props) {
     )
   }
 
-  // Reader mode
+  // ── Presentation mode rendering ──────────────────────────
+  if (presenting && currentSlide) {
+    const slide = currentSlide
+    const slideHeight = slide.lines.length
+    const topPad = slideHeight <= bodyHeight
+      ? Math.floor((bodyHeight - slideHeight) / 2)
+      : 0
+    const maxSlideScroll = Math.max(0, slideHeight - bodyHeight)
+    const clampedScroll = Math.min(slideScroll, maxSlideScroll)
+    const visibleSlide = slideHeight <= bodyHeight
+      ? slide.lines
+      : slide.lines.slice(clampedScroll, clampedScroll + bodyHeight)
+
+    // Reverse-video highlight on focused block
+    const highlighted = applyFocusHighlight(visibleSlide, slide.blocks, focusedBlock, clampedScroll)
+
+    // Directional wipe transition (2-line band)
+    if (splitFlap) {
+      const { phase, totalPhases, direction, oldLines, newLines } = splitFlap
+      const bandWidth = 2
+      const progress = phase / totalPhases
+      const totalDist = bodyHeight + bandWidth
+
+      let bandTop: number
+      let aboveBand: string[]
+      let belowBand: string[]
+
+      if (direction === 'forward') {
+        // Band sweeps UP: new content revealed below, old fades above
+        bandTop = Math.round(bodyHeight - progress * totalDist)
+        aboveBand = oldLines
+        belowBand = newLines
+      } else {
+        // Band sweeps DOWN: new content revealed above, old fades below
+        bandTop = Math.round(-bandWidth + progress * totalDist)
+        aboveBand = newLines
+        belowBand = oldLines
+      }
+      const bandBottom = bandTop + bandWidth
+
+      return (
+        <Box flexDirection="column" width={dims.cols} height={dims.rows}>
+          <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
+            {Array.from({ length: bodyHeight }, (_, i) => {
+              let line: string
+              if (i < bandTop) {
+                line = aboveBand[i] || ' '
+              } else if (i >= bandBottom) {
+                line = belowBand[i] || ' '
+              } else {
+                line = generateFlipLine(dims.cols)
+              }
+              return <Text key={i} wrap="truncate">{line}</Text>
+            })}
+          </Box>
+          <StatusBar
+            screen="presentation"
+            width={dims.cols}
+            slideIndex={slideIndex}
+            slideCount={slides.length}
+          />
+        </Box>
+      )
+    }
+
+    return (
+      <Box flexDirection="column" width={dims.cols} height={dims.rows}>
+        <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
+          {Array.from({ length: bodyHeight }, (_, i) => {
+            const lineIdx = i - topPad
+            const content = lineIdx >= 0 && lineIdx < highlighted.length ? highlighted[lineIdx] : ''
+            return <Text key={i} wrap="truncate">{padding}{content || ' '}</Text>
+          })}
+        </Box>
+        <StatusBar
+          screen="presentation"
+          width={dims.cols}
+          slideIndex={slideIndex}
+          slideCount={slides.length}
+          slideTitle={slide.title}
+          slideOverflow={slideHeight > bodyHeight}
+        />
+      </Box>
+    )
+  }
+
+  // ── Reader mode ─────────────────────────────────────────
   const visible = lines.slice(scroll, scroll + bodyHeight)
 
   // Apply search highlighting to visible lines
@@ -276,7 +565,7 @@ export function App({ initialFile }: Props) {
     <Box flexDirection="column" width={dims.cols} height={dims.rows}>
       <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
         {Array.from({ length: bodyHeight }, (_, i) => (
-          <Text key={i} wrap="truncate">{displayLines[i] || ' '}</Text>
+          <Text key={i} wrap="truncate">{padding}{displayLines[i] || ' '}</Text>
         ))}
       </Box>
       <StatusBar
@@ -292,6 +581,8 @@ export function App({ initialFile }: Props) {
         searchQuery={searchQuery}
         matchCount={matchLines.length}
         matchIndex={matchIndex}
+        headingIndex={currentHeading}
+        headingCount={headings.length}
       />
     </Box>
   )
