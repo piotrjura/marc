@@ -66,14 +66,14 @@ interface StatusBarProps {
   slideCount?: number
   slideTitle?: string
   slideOverflow?: boolean
+  counterText?: string  // pre-formatted counter (for split-flap animation)
 }
 
-export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctProp, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex, headingIndex, headingCount, slideIndex, slideCount, slideTitle, slideOverflow }: StatusBarProps) {
+export function StatusBar({ screen, width, fileName, line, totalLines, pct: pctProp, canGoBack, stale, fileCount, searchMode, searchQuery, matchCount, matchIndex, headingIndex, headingCount, slideIndex, slideCount, slideTitle, slideOverflow, counterText }: StatusBarProps) {
   if (screen === 'presentation') {
-    const idx = (slideIndex ?? 0) + 1
-    const total = slideCount ?? 0
+    const counter = counterText ?? `${(slideIndex ?? 0) + 1}/${slideCount ?? 0}`
     const title = slideTitle ? `  ${slideTitle}` : ''
-    const left = ` Slide ${idx}/${total}${title}`
+    const left = ` Slide ${counter}${title}`
     const right = slideOverflow
       ? '← → slide  ↑↓ focus/scroll  p exit '
       : '← → slide  ↑↓ focus  p exit '

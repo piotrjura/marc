@@ -3,12 +3,13 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import { readFileSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
-import { renderMarkdownWithBlocks } from './lib/render.js'
+import { renderMarkdownWithBlocks, parseFrontmatter } from './lib/render.js'
 import { splitIntoSlides, type Slide } from './lib/slides.js'
 import { findMatches, highlightLine } from './lib/search-doc.js'
 import { scanMarkdownFiles, type FileInfo } from './lib/files.js'
 import { FileList, type ListState } from './components/file-list.js'
 import { StatusBar } from './components/status-bar.js'
+import { scrambleLine, flipDigits } from './lib/animations.js'
 import type { BlockRange } from './lib/render.js'
 
 // ── Presentation helpers ──────────────────────────────────
@@ -70,9 +71,10 @@ type Screen =
 
 interface Props {
   initialFile?: { name: string; absPath: string; content: string }
+  initialPresentation?: boolean
 }
 
-export function App({ initialFile }: Props) {
+export function App({ initialFile, initialPresentation }: Props) {
   const { exit } = useApp()
   const { stdout } = useStdout()
   const [dims, setDims] = useState({
@@ -103,6 +105,23 @@ export function App({ initialFile }: Props) {
   const [slideScroll, setSlideScroll] = useState(0)
   const [focusedBlock, setFocusedBlock] = useState(-1)
   const [splitFlap, setSplitFlap] = useState<SplitFlapState | null>(null)
+
+  // Animation: title slide descramble (figlet chars resolve from random after wipe)
+  const [descramble, setDescramble] = useState<{ frame: number; totalFrames: number } | null>(null)
+
+  // Animation: split-flap counter in status bar
+  const [counterAnim, setCounterAnim] = useState<{ frame: number } | null>(null)
+
+  // Animation: smooth scroll (reader mode)
+  const [scrollTarget, setScrollTarget] = useState<number | null>(null)
+
+  // Animation: section wipe (reader mode heading jumps)
+  const [sectionWipe, setSectionWipe] = useState<{
+    phase: number
+    totalPhases: number
+    oldLines: string[]
+    newScroll: number
+  } | null>(null)
 
   // Scan files for browser mode
   const files = useMemo(() => {
@@ -148,6 +167,13 @@ export function App({ initialFile }: Props) {
     return splitIntoSlides(screen.content, presentWidth)
   }, [screen, presentWidth])
 
+  // Check frontmatter for effects (e.g. effects: descramble)
+  const hasDescrambleEffect = useMemo(() => {
+    if (screen.type !== 'reader') return false
+    const fm = parseFrontmatter(screen.content)
+    return (fm.effects ?? '').split(',').map(s => s.trim()).includes('descramble')
+  }, [screen])
+
   const maxScroll = Math.max(0, lines.length - bodyHeight)
 
   // Search matches
@@ -184,9 +210,23 @@ export function App({ initialFile }: Props) {
     if (scroll > maxScroll) setScroll(maxScroll)
   }, [maxScroll, scroll])
 
-  const scrollTo = useCallback((n: number) => {
-    setScroll(s => Math.max(0, Math.min(n, Math.max(0, lines.length - bodyHeight))))
+  /** Immediate scroll (no animation). */
+  const scrollImmediate = useCallback((n: number) => {
+    setScroll(Math.max(0, Math.min(n, Math.max(0, lines.length - bodyHeight))))
+    setScrollTarget(null)
   }, [lines.length, bodyHeight])
+
+  /** Smooth scroll — animates for jumps > 3 lines, instant for small moves. */
+  const scrollTo = useCallback((n: number) => {
+    const clamped = Math.max(0, Math.min(n, Math.max(0, lines.length - bodyHeight)))
+    const dist = Math.abs(clamped - scroll)
+    if (dist <= 3) {
+      setScroll(clamped)
+      setScrollTarget(null)
+    } else {
+      setScrollTarget(clamped)
+    }
+  }, [lines.length, bodyHeight, scroll])
 
   const openFile = useCallback((file: FileInfo, state: ListState) => {
     listStateRef.current = state
@@ -296,10 +336,22 @@ export function App({ initialFile }: Props) {
       if (prev === -1) return
       target = prev
     }
-    scrollTo(headings[target])
-  }, [headings, scroll, scrollTo])
+    const newScroll = Math.max(0, Math.min(headings[target], Math.max(0, lines.length - bodyHeight)))
+    const dist = Math.abs(newScroll - scroll)
+    // Only wipe for jumps > 5 lines
+    if (dist > 5) {
+      const oldLines = lines.slice(scroll, scroll + bodyHeight).map(l => padding + (l || ' '))
+      setSectionWipe({ phase: 0, totalPhases: 6, oldLines, newScroll })
+    } else {
+      scrollImmediate(newScroll)
+    }
+  }, [headings, scroll, lines, bodyHeight, padding, scrollImmediate])
 
   // ── Presentation mode ─────────────────────────────────────
+  const isTitleSlideCheck = useCallback((slide: Slide) => {
+    return slide.lines.length > 5 && slide.blocks.length <= 1 && slide.title !== ''
+  }, [])
+
   const enterPresentation = useCallback(() => {
     setPresenting(true)
     setSlideIndex(0)
@@ -307,12 +359,29 @@ export function App({ initialFile }: Props) {
     setFocusedBlock(-1)
     setSearchMode(false)
     setSearchQuery('')
-  }, [])
+    // Title slides get descramble entrance (opt-in via frontmatter: effects: descramble)
+    const firstSlide = slides[0]
+    if (hasDescrambleEffect && firstSlide && isTitleSlideCheck(firstSlide)) {
+      setDescramble({ frame: 0, totalFrames: 6 })
+    } else {
+      setDescramble(null)
+    }
+    setCounterAnim(null)
+  }, [slides, isTitleSlideCheck, hasDescrambleEffect])
+
+  // Auto-enter presentation mode when launched with -p flag
+  useEffect(() => {
+    if (initialPresentation && slides.length > 0 && !presenting) {
+      enterPresentation()
+    }
+  }, [initialPresentation, slides.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exitPresentation = useCallback(() => {
     setPresenting(false)
     setFocusedBlock(-1)
     setSlideScroll(0)
+    setDescramble(null)
+    setCounterAnim(null)
   }, [])
 
   const currentSlide = slides[slideIndex] as Slide | undefined
@@ -324,13 +393,24 @@ export function App({ initialFile }: Props) {
     if (!oldSlide || !newSlide) return
     const direction = idx > slideIndex ? 'forward' : 'backward'
     const totalPhases = 8
+
     const oldLines = renderSlideToScreen(oldSlide, bodyHeight, padding)
     const newLines = renderSlideToScreen(newSlide, bodyHeight, padding)
     setSplitFlap({ phase: 0, totalPhases, direction, oldLines, newLines })
     setSlideIndex(idx)
     setSlideScroll(0)
     setFocusedBlock(-1)
-  }, [slides, slideIndex, bodyHeight, padding])
+
+    // Title slides get descramble effect after wipe (opt-in via frontmatter)
+    if (hasDescrambleEffect && isTitleSlideCheck(newSlide)) {
+      setDescramble({ frame: 0, totalFrames: 6 })
+    } else {
+      setDescramble(null)
+    }
+
+    // Counter flip animation
+    setCounterAnim({ frame: 0 })
+  }, [slides, slideIndex, bodyHeight, padding, isTitleSlideCheck, hasDescrambleEffect])
 
   // Advance split-flap animation frames
   useEffect(() => {
@@ -345,15 +425,74 @@ export function App({ initialFile }: Props) {
     return () => clearTimeout(timer)
   }, [splitFlap])
 
+  // Advance title descramble animation (waits for split-flap to finish)
+  useEffect(() => {
+    if (!descramble || splitFlap) return
+    if (descramble.frame >= descramble.totalFrames) {
+      setDescramble(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setDescramble(prev => prev ? { ...prev, frame: prev.frame + 1 } : null)
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [descramble, splitFlap])
+
+  // Advance counter flip animation
+  useEffect(() => {
+    if (!counterAnim) return
+    if (counterAnim.frame >= 4) {
+      setCounterAnim(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setCounterAnim(prev => prev ? { ...prev, frame: prev.frame + 1 } : null)
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [counterAnim])
+
+  // Smooth scroll animation (reader mode)
+  useEffect(() => {
+    if (scrollTarget === null) return
+    if (scroll === scrollTarget) {
+      setScrollTarget(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      const diff = scrollTarget - scroll
+      const step = Math.sign(diff) * Math.max(1, Math.ceil(Math.abs(diff) / 3))
+      setScroll(s => {
+        const next = s + step
+        if ((step > 0 && next >= scrollTarget) || (step < 0 && next <= scrollTarget)) return scrollTarget
+        return next
+      })
+    }, 16)
+    return () => clearTimeout(timer)
+  }, [scroll, scrollTarget])
+
+  // Section wipe animation (reader mode heading jumps)
+  useEffect(() => {
+    if (!sectionWipe) return
+    if (sectionWipe.phase >= sectionWipe.totalPhases) {
+      setScroll(sectionWipe.newScroll)
+      setSectionWipe(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      setSectionWipe(prev => prev ? { ...prev, phase: prev.phase + 1 } : null)
+    }, 35)
+    return () => clearTimeout(timer)
+  }, [sectionWipe])
+
   // Reader keyboard input
   useInput((input, key) => {
     if (screen.type !== 'reader') return
 
     // Presentation mode keybindings
     if (presenting) {
-      if (splitFlap) return // ignore keys during split-flap transition
-      if (key.escape || input === 'p') return exitPresentation()
+      if (key.escape || input === 'p') { setDescramble(null); return exitPresentation() }
       if (input === 'q') return exit()
+      if (splitFlap || descramble) return // ignore navigation during transitions
       if ((key.rightArrow || input === ' ' || input === 'l') && slideIndex < slides.length - 1) {
         return goToSlide(slideIndex + 1)
       }
@@ -420,6 +559,7 @@ export function App({ initialFile }: Props) {
 
     // Normal mode
     if (input === 'q') return exit()
+    if (sectionWipe) return // ignore navigation during section wipe
     if (key.escape) {
       if (searchQuery) { setSearchQuery(''); return }
       return goBack()
@@ -495,17 +635,19 @@ export function App({ initialFile }: Props) {
       let belowBand: string[]
 
       if (direction === 'forward') {
-        // Band sweeps UP: new content revealed below, old fades above
         bandTop = Math.round(bodyHeight - progress * totalDist)
         aboveBand = oldLines
         belowBand = newLines
       } else {
-        // Band sweeps DOWN: new content revealed above, old fades below
         bandTop = Math.round(-bandWidth + progress * totalDist)
         aboveBand = newLines
         belowBand = oldLines
       }
       const bandBottom = bandTop + bandWidth
+
+      // Counter text for status bar (with flip animation)
+      const counterText = `${slideIndex + 1}/${slides.length}`
+      const flipText = counterAnim ? flipDigits(counterText, counterAnim.frame / 4) : counterText
 
       return (
         <Box flexDirection="column" width={dims.cols} height={dims.rows}>
@@ -527,10 +669,42 @@ export function App({ initialFile }: Props) {
             width={dims.cols}
             slideIndex={slideIndex}
             slideCount={slides.length}
+            counterText={flipText}
           />
         </Box>
       )
     }
+
+    // Title slide descramble: figlet characters resolve from random
+    if (descramble) {
+      const progress = descramble.frame / descramble.totalFrames
+
+      return (
+        <Box flexDirection="column" width={dims.cols} height={dims.rows}>
+          <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
+            {Array.from({ length: bodyHeight }, (_, i) => {
+              const lineIdx = i - topPad
+              const content = lineIdx >= 0 && lineIdx < highlighted.length ? highlighted[lineIdx] : ''
+              const line = content || ' '
+              const scrambled = line.trim() ? scrambleLine(line, progress) : line
+              return <Text key={i} wrap="truncate">{padding}{scrambled}</Text>
+            })}
+          </Box>
+          <StatusBar
+            screen="presentation"
+            width={dims.cols}
+            slideIndex={slideIndex}
+            slideCount={slides.length}
+            slideTitle={slide.title}
+            slideOverflow={slideHeight > bodyHeight}
+            counterText={counterAnim ? flipDigits(`${slideIndex + 1}/${slides.length}`, counterAnim.frame / 4) : undefined}
+          />
+        </Box>
+      )
+    }
+
+    // Counter text for status bar
+    const counterText = counterAnim ? flipDigits(`${slideIndex + 1}/${slides.length}`, counterAnim.frame / 4) : undefined
 
     return (
       <Box flexDirection="column" width={dims.cols} height={dims.rows}>
@@ -547,13 +721,60 @@ export function App({ initialFile }: Props) {
           slideIndex={slideIndex}
           slideCount={slides.length}
           slideTitle={slide.title}
-          slideOverflow={slideHeight > bodyHeight}
+          slideOverflow={slide.lines.length > bodyHeight}
+          counterText={counterText}
         />
       </Box>
     )
   }
 
   // ── Reader mode ─────────────────────────────────────────
+
+  // Section wipe transition (heading jumps)
+  if (sectionWipe) {
+    const { phase, totalPhases, oldLines, newScroll } = sectionWipe
+    const progress = phase / totalPhases
+    const newLines = lines.slice(newScroll, newScroll + bodyHeight).map(l => padding + (l || ' '))
+    const bandWidth = 2
+    const totalDist = bodyHeight + bandWidth
+    const bandTop = Math.round(bodyHeight - progress * totalDist)
+    const bandBottom = bandTop + bandWidth
+
+    return (
+      <Box flexDirection="column" width={dims.cols} height={dims.rows}>
+        <Box flexDirection="column" flexGrow={1} height={bodyHeight}>
+          {Array.from({ length: bodyHeight }, (_, i) => {
+            let line: string
+            if (i < bandTop) {
+              line = oldLines[i] || ' '
+            } else if (i >= bandBottom) {
+              line = newLines[i] || ' '
+            } else {
+              line = generateFlipLine(dims.cols)
+            }
+            return <Text key={i} wrap="truncate">{line}</Text>
+          })}
+        </Box>
+        <StatusBar
+          screen="reader"
+          width={dims.cols}
+          fileName={screen.fileName}
+          line={newScroll + 1}
+          totalLines={lines.length}
+          pct={maxScroll > 0 ? Math.round((newScroll / maxScroll) * 100) : 100}
+          canGoBack={hasList}
+          stale={stale}
+          searchMode={searchMode}
+          searchQuery={searchQuery}
+          matchCount={matchLines.length}
+          matchIndex={matchIndex}
+          headingIndex={currentHeading}
+          headingCount={headings.length}
+        />
+      </Box>
+    )
+  }
+
   const visible = lines.slice(scroll, scroll + bodyHeight)
 
   // Apply search highlighting to visible lines

@@ -109,7 +109,28 @@ notes/meeting-notes.md
 
 **Editor integration** — press `e` to open the current file in `$EDITOR` (falls back to `vi`). Marc reloads the file automatically when the editor exits.
 
-**Presentation mode** — press `p` in the reader to present markdown as slides. Slides are separated by `---` (horizontal rules). Content is centered at 88% terminal width. Navigate slides with arrow keys or `h`/`l`. Use `↓`/`↑` to step through blocks (headings, paragraphs, individual bullets) — the focused block is highlighted with reverse video. Slide transitions use a split-flap wipe effect that sweeps directionally (up for next, down for previous). Files without `---` separators display as a single slide.
+**Presentation mode** — press `p` in the reader to present markdown as a slideshow. Slides are separated by `---` (horizontal rules). Content is centered at 88% terminal width. Navigate with arrow keys or `h`/`l`. Use `↓`/`↑` to step through blocks — the focused block is highlighted with reverse video. Slide transitions use a directional split-flap wipe effect.
+
+**Title slides** — any slide with only a heading (and an optional subtitle paragraph) renders as full-screen ASCII art with a purple-to-cyan gradient. Powered by figlet (ANSI Shadow font) with word-level wrapping so words are never broken across lines. Add a paragraph after the heading for a dimmed subtitle.
+
+**Effects** — add `effects: descramble` to the YAML frontmatter to enable a descramble animation on title slides (figlet characters resolve from random noise). Off by default.
+
+```markdown
+---
+effects: descramble
+---
+
+# My Talk
+
+A subtitle goes here
+
+---
+
+# Regular Slide
+
+- This slide has bullet points so it renders normally
+- Title slides are heading-only (+ optional subtitle)
+```
 
 ## How it works
 
@@ -148,6 +169,11 @@ npm test             # Run tests (vitest)
 ```
 
 ## Changelog
+
+### 0.4.1
+
+- **Title slides** — heading-only slides render as big ASCII art (ANSI Shadow font) with a purple-to-cyan gradient. Optional subtitle paragraph below.
+- **Word-level wrapping** — figlet titles wrap at word boundaries so words are never broken across lines.
 
 ### 0.4.0
 

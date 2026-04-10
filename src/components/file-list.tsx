@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import type { FileInfo } from '../lib/files.js'
 import { formatSize, formatRelativeTime } from '../lib/files.js'
@@ -66,6 +66,19 @@ export function FileList({
   const pageSize = Math.max(3, Math.floor((height - 4 - (searchVisible ? 2 : 0)) / linesPerItem))
 
   const displayItems = isContentSearch ? contentResults : filteredFiles
+
+  // Cascade animation: items appear with staggered delay
+  const [cascadeCount, setCascadeCount] = useState(0)
+  const cascadeKey = `${search}-${searchType}-${page}` // reset on change
+  useEffect(() => {
+    setCascadeCount(0)
+  }, [cascadeKey])
+  useEffect(() => {
+    if (cascadeCount >= pageSize + 5) return
+    const timer = setTimeout(() => setCascadeCount(c => c + 1), 15)
+    return () => clearTimeout(timer)
+  }, [cascadeCount, pageSize])
+
   const totalPages = Math.max(1, Math.ceil(displayItems.length / pageSize))
   const clampedPage = Math.min(page, totalPages - 1)
   const pageItems = displayItems.slice(clampedPage * pageSize, (clampedPage + 1) * pageSize)
@@ -134,6 +147,7 @@ export function FileList({
         {isContentSearch
           ? /* Content search results */
             (pageItems as SearchResult[]).map((result, i) => {
+              if (i >= cascadeCount) return null
               const isCursor = i === cursor
               const file = result.file
               const preview = formatMatchPreview(result.matches[0], width - 10)
@@ -165,6 +179,7 @@ export function FileList({
             })
           : /* Normal file list */
             (pageItems as FileInfo[]).map((file, i) => {
+              if (i >= cascadeCount) return null
               const isCursor = i === cursor
               const sizeStr = formatSize(file.size).padStart(8)
               const timeStr = formatRelativeTime(file.mtime).padStart(5)

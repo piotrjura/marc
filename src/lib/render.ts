@@ -68,6 +68,18 @@ export function stripFrontmatter(source: string): string {
   return match ? source.slice(match[0].length) : source
 }
 
+/** Parse simple key: value pairs from YAML frontmatter. */
+export function parseFrontmatter(source: string): Record<string, string> {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!match) return {}
+  const result: Record<string, string> = {}
+  for (const line of match[1].split('\n')) {
+    const m = line.match(/^(\w+)\s*:\s*(.+)$/)
+    if (m) result[m[1]] = m[2].trim()
+  }
+  return result
+}
+
 // ── Block-level rendering ──────────────────────────────────────
 
 const HEADING_STYLES = [

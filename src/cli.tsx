@@ -9,6 +9,24 @@ import { searchFileContents } from './lib/search.js'
 const args = process.argv.slice(2)
 const subcommand = args[0]
 const filePath = subcommand !== 'search' ? args.find(a => !a.startsWith('-')) : undefined
+const presentationFlag = args.includes('-p') || args.includes('--presentation')
+
+function isUrl(s: string): boolean {
+  return s.startsWith('http://') || s.startsWith('https://')
+}
+
+/** Convert GitHub blob URLs to raw.githubusercontent.com URLs. */
+function toRawGitHubUrl(url: string): string {
+  const m = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/)
+  if (m) return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}`
+  return url
+}
+
+function fileNameFromUrl(url: string): string {
+  const pathname = new URL(url).pathname
+  const last = pathname.split('/').filter(Boolean).pop()
+  return last || 'remote.md'
+}
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`marc — markdown reader for the terminal
@@ -16,8 +34,13 @@ if (args.includes('--help') || args.includes('-h')) {
 Usage:
   marc              Browse markdown files in current directory
   marc <file>       Open a specific markdown file
+  marc <url>        Open a markdown file from a remote URL
+  marc <file> -p    Open directly in presentation mode
   marc search <q>   Search inside markdown files
   marc --help       Show this help
+
+Options:
+  -p, --presentation   Start in presentation mode (requires a file)
 
 File browser:
   j / ↓             Navigate down
@@ -72,7 +95,26 @@ if (subcommand === 'search') {
   process.exit(0)
 }
 
-if (filePath) {
+if (filePath && isUrl(filePath)) {
+  // Remote URL mode
+  const rawUrl = toRawGitHubUrl(filePath)
+  const name = fileNameFromUrl(rawUrl)
+  let content: string
+  try {
+    const res = await fetch(rawUrl)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    content = await res.text()
+  } catch (err) {
+    console.error(`marc: cannot fetch "${filePath}"${err instanceof Error ? ` — ${err.message}` : ''}`)
+    process.exit(1)
+  }
+
+  const app = withFullScreen(
+    <App initialFile={{ name, absPath: rawUrl, content }} initialPresentation={presentationFlag} />
+  )
+  await app.start()
+  await app.waitUntilExit()
+} else if (filePath) {
   // Direct file mode
   const absPath = resolve(filePath)
   let content: string
@@ -83,11 +125,17 @@ if (filePath) {
     process.exit(1)
   }
 
-  const app = withFullScreen(<App initialFile={{ name: basename(filePath), absPath, content }} />)
+  const app = withFullScreen(
+    <App initialFile={{ name: basename(filePath), absPath, content }} initialPresentation={presentationFlag} />
+  )
   await app.start()
   await app.waitUntilExit()
 } else {
   // Browser mode
+  if (presentationFlag) {
+    console.error('marc: -p/--presentation requires a file argument')
+    process.exit(1)
+  }
   const app = withFullScreen(<App />)
   await app.start()
   await app.waitUntilExit()

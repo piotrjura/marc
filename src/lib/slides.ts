@@ -1,4 +1,8 @@
 import { marked } from 'marked'
+import figlet from 'figlet'
+import chalk from 'chalk'
+import stringWidth from 'string-width'
+import wrapAnsi from 'wrap-ansi'
 import { stripFrontmatter, renderBlock, renderListWithItems, type BlockRange } from './render.js'
 
 export interface Slide {
@@ -40,8 +44,11 @@ export function splitIntoSlides(source: string, width: number): Slide[] {
     return [{ lines: [''], blocks: [], title: '' }]
   }
 
-  // Render each group into a Slide
-  return tokenGroups.map(group => renderSlide(group, effectiveWidth))
+  // Render each group into a Slide (title slides get big ASCII art)
+  return tokenGroups.map(group => {
+    if (isTitleSlide(group)) return renderTitleSlide(group, effectiveWidth)
+    return renderSlide(group, effectiveWidth)
+  })
 }
 
 function renderSlide(tokens: any[], width: number): Slide {
@@ -66,7 +73,10 @@ function renderSlide(tokens: any[], width: number): Slide {
     if (blockLines.length === 0) continue
     const start = lines.length
     lines.push(...blockLines)
-    blocks.push({ start, end: lines.length })
+    // Only paragraphs are focusable — skip headings, code, tables, blockquotes, html
+    if (token.type === 'paragraph' || token.type === 'blockquote') {
+      blocks.push({ start, end: lines.length })
+    }
     lines.push('')
 
     // Capture first heading as slide title
@@ -98,6 +108,118 @@ function renderSlide(tokens: any[], width: number): Slide {
       if (b.start < 0) b.start = 0
     }
     return { lines, blocks: valid, title }
+  }
+
+  return { lines, blocks, title }
+}
+
+// ── Title slides ──────────────────────────────────────────────
+
+const GRADIENT_START = [192, 132, 252] as const  // #c084fc purple
+const GRADIENT_END = [34, 211, 238] as const     // #22d3ee cyan
+
+function lerp(a: readonly number[], b: readonly number[], t: number): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ]
+}
+
+/** A title slide has exactly one heading and zero or more paragraphs (subtitle). */
+function isTitleSlide(tokens: any[]): boolean {
+  const headings = tokens.filter((t: any) => t.type === 'heading')
+  const others = tokens.filter((t: any) => t.type !== 'heading' && t.type !== 'paragraph')
+  return headings.length === 1 && others.length === 0
+}
+
+function centerLine(line: string, width: number): string {
+  const w = stringWidth(line)
+  if (w >= width) return line
+  return ' '.repeat(Math.floor((width - w) / 2)) + line
+}
+
+/** Measure the visual width of figlet output (max line length). */
+function figletWidth(text: string): number {
+  const lines = text.split('\n')
+  return Math.max(...lines.map(l => l.length))
+}
+
+/** Split title into word groups that each fit within `width` when rendered via figlet. */
+function wordWrapFiglet(title: string, width: number): string[][] {
+  const words = title.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return []
+
+  const groups: string[][] = []
+  let current: string[] = []
+
+  for (const word of words) {
+    const candidate = [...current, word]
+    try {
+      const art = figlet.textSync(candidate.join(' '), { font: 'ANSI Shadow' })
+      if (figletWidth(art) <= width) {
+        current = candidate
+      } else if (current.length === 0) {
+        // Single word too wide — let figlet break it (no better option)
+        groups.push([word])
+      } else {
+        groups.push(current)
+        current = [word]
+      }
+    } catch {
+      if (current.length > 0) groups.push(current)
+      current = [word]
+    }
+  }
+  if (current.length > 0) groups.push(current)
+  return groups
+}
+
+function renderTitleSlide(tokens: any[], width: number): Slide {
+  const heading = tokens.find((t: any) => t.type === 'heading')
+  const paragraphs = tokens.filter((t: any) => t.type === 'paragraph')
+  const title = heading?.text ?? ''
+
+  // Render word groups separately so words are never broken across lines
+  const wordGroups = wordWrapFiglet(title, width)
+  if (wordGroups.length === 0) return renderSlide(tokens, width)
+
+  let allArtLines: string[] = []
+  for (const group of wordGroups) {
+    let artText: string
+    try {
+      artText = figlet.textSync(group.join(' '), { font: 'ANSI Shadow' })
+    } catch {
+      return renderSlide(tokens, width)
+    }
+    const groupLines = artText.split('\n')
+    // Trim trailing empty lines from each group
+    while (groupLines.length > 0 && groupLines[groupLines.length - 1].trim() === '') {
+      groupLines.pop()
+    }
+    allArtLines.push(...groupLines)
+  }
+
+  // Apply purple→cyan gradient and center each line
+  const lines: string[] = allArtLines.map((line, i) => {
+    const t = allArtLines.length > 1 ? i / (allArtLines.length - 1) : 0
+    const [r, g, b] = lerp(GRADIENT_START, GRADIENT_END, t)
+    return centerLine(chalk.rgb(r, g, b)(line), width)
+  })
+
+  // Add subtitle paragraphs (dimmed, centered)
+  const blocks: BlockRange[] = []
+  if (paragraphs.length > 0) {
+    lines.push('')
+    for (const p of paragraphs) {
+      const text = p.tokens?.map((t: any) => t.raw ?? t.text ?? '').join('') ?? p.text ?? ''
+      const wrapped = wrapAnsi(text, Math.min(width, 80), { hard: true }).split('\n')
+      const start = lines.length
+      for (const wl of wrapped) {
+        lines.push(centerLine(chalk.dim(wl), width))
+      }
+      blocks.push({ start, end: lines.length })
+    }
   }
 
   return { lines, blocks, title }
