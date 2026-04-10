@@ -281,13 +281,21 @@ export function App({ initialFile, initialPresentation }: Props) {
     return () => clearInterval(interval)
   }, [screen])
 
-  const reloadFile = useCallback(() => {
+  const reloadFile = useCallback(async () => {
     if (screen.type !== 'reader') return
+    const isRemote = screen.absPath.startsWith('http://') || screen.absPath.startsWith('https://')
     try {
-      const content = readFileSync(screen.absPath, 'utf-8')
+      let content: string
+      if (isRemote) {
+        const res = await fetch(screen.absPath)
+        if (!res.ok) return
+        content = await res.text()
+      } else {
+        content = readFileSync(screen.absPath, 'utf-8')
+        mtimeRef.current = statSync(screen.absPath).mtimeMs
+      }
       setScreen({ type: 'reader', fileName: screen.fileName, absPath: screen.absPath, content })
       setStale(false)
-      mtimeRef.current = statSync(screen.absPath).mtimeMs
     } catch { /* */ }
   }, [screen])
 
@@ -492,6 +500,7 @@ export function App({ initialFile, initialPresentation }: Props) {
     if (presenting) {
       if (key.escape || input === 'p') { setDescramble(null); return exitPresentation() }
       if (input === 'q') return exit()
+      if (input === 'r') { reloadFile(); return }
       if (splitFlap || descramble) return // ignore navigation during transitions
       if ((key.rightArrow || input === ' ' || input === 'l') && slideIndex < slides.length - 1) {
         return goToSlide(slideIndex + 1)

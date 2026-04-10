@@ -38,6 +38,24 @@ marc docs/setup.md
 
 Opens the file directly in the reader.
 
+### Open from a URL
+
+```bash
+marc https://raw.githubusercontent.com/user/repo/main/slides.md
+marc https://github.com/user/repo/blob/main/slides.md
+```
+
+Fetches a remote markdown file and opens it in the reader. GitHub blob URLs are automatically resolved to raw content.
+
+### Start in presentation mode
+
+```bash
+marc slides.md -p
+marc https://github.com/user/repo/blob/main/talk.md -p
+```
+
+The `-p` (or `--presentation`) flag skips the reader and goes straight into presentation mode. Works with both local files and remote URLs.
+
 ### Search inside files
 
 ```bash
@@ -94,6 +112,7 @@ notes/meeting-notes.md
 | `←` / `h` | Previous slide |
 | `↓` / `j` | Highlight next block |
 | `↑` / `k` | Highlight previous block |
+| `r` | Reload file |
 | `Esc` / `p` | Exit presentation |
 | `q` | Quit |
 
@@ -169,6 +188,16 @@ npm test             # Run tests (vitest)
 ```
 
 ## Changelog
+
+### 0.6.0
+
+- **Remote URL loading** — open markdown files directly from URLs (`marc https://...`). GitHub blob URLs are auto-resolved to raw content.
+- **Presentation flag** — `-p` / `--presentation` starts directly in presentation mode, skipping the reader.
+- **Reload in presentation** — press `r` to reload the current file (re-fetches remote URLs).
+
+### 0.5.0
+
+- **Animation cleanup** — removed broken cascade, fade-in, and animated bullet effects. Title descramble now opt-in via `effects: descramble` frontmatter.
 
 ### 0.4.1
 
